@@ -81,12 +81,12 @@ export function PageSpeedDashboard({ mobileData, desktopData, url }: PageSpeedDa
 
       {/* 详细数据标签页 */}
       <Tabs defaultValue="cwv" className="w-full">
-        <TabsList className="grid w-full grid-cols-6 h-auto">
-          <TabsTrigger value="cwv" className="text-xs sm:text-sm">Core Web Vitals</TabsTrigger>
-          <TabsTrigger value="metrics" className="text-xs sm:text-sm">性能指标</TabsTrigger>
-          <TabsTrigger value="opportunities" className="text-xs sm:text-sm">优化机会</TabsTrigger>
-          <TabsTrigger value="diagnostics" className="text-xs sm:text-sm">诊断</TabsTrigger>
-          <TabsTrigger value="summary" className="text-xs sm:text-sm">分析摘要</TabsTrigger>
+        <TabsList className="flex w-full h-auto">
+          <TabsTrigger value="cwv" className="text-xs sm:text-sm flex-1">Core Web Vitals</TabsTrigger>
+          <TabsTrigger value="metrics" className="text-xs sm:text-sm flex-1">性能指标</TabsTrigger>
+          <TabsTrigger value="opportunities" className="text-xs sm:text-sm flex-1">优化机会</TabsTrigger>
+          <TabsTrigger value="diagnostics" className="text-xs sm:text-sm flex-1">诊断</TabsTrigger>
+          <TabsTrigger value="summary" className="text-xs sm:text-sm flex-1">分析摘要</TabsTrigger>
         </TabsList>
 
         <TabsContent value="cwv" className="mt-6">
@@ -171,28 +171,33 @@ function DashboardHeader({
             </div>
           </div>
 
-          {/* 右侧：设备切换 */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center bg-muted rounded-lg p-1">
-              <Button
-                variant={activeDevice === "mobile" ? "secondary" : "ghost"}
-                size="sm"
+          {/* 右侧：设备切换 - Tab 样式 */}
+          <div className="flex items-center">
+            <div className="inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground">
+              <button
                 onClick={() => onDeviceChange("mobile")}
-                className="gap-2"
+                disabled={!hasDesktopData && activeDevice === "mobile"}
+                className={`inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${
+                  activeDevice === "mobile"
+                    ? "bg-background text-foreground shadow"
+                    : "hover:bg-background/50 hover:text-foreground"
+                }`}
               >
-                <Smartphone className="h-4 w-4" />
+                <Smartphone className="h-4 w-4 mr-2" />
                 移动端
-              </Button>
-              <Button
-                variant={activeDevice === "desktop" ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => onDeviceChange("desktop")}
+              </button>
+              <button
+                onClick={() => hasDesktopData && onDeviceChange("desktop")}
                 disabled={!hasDesktopData}
-                className="gap-2"
+                className={`inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${
+                  activeDevice === "desktop"
+                    ? "bg-background text-foreground shadow"
+                    : "hover:bg-background/50 hover:text-foreground"
+                }`}
               >
-                <Monitor className="h-4 w-4" />
+                <Monitor className="h-4 w-4 mr-2" />
                 桌面端
-              </Button>
+              </button>
             </div>
           </div>
         </div>
