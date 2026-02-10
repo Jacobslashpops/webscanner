@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   CheckCircle2,
   Loader2,
@@ -61,40 +61,69 @@ export function AnalysisFlow({
 }: AnalysisFlowProps) {
   const [expandedStep, setExpandedStep] = useState<AnalysisStep | null>("performance");
   const [localPerformanceData, setLocalPerformanceData] = useState<PerformanceResultData | undefined>(performanceData);
+  const [analysisStatus, setAnalysisStatus] = useState<"idle" | "running" | "completed" | "error">("idle");
   
-  // 流式分析状态
+  // 使用 ref 防止重复执行
+  const hasStartedRef = useRef(false);
+  const hasCompletedRef = useRef(false);
+  
+  // 流式分析状态 - 用于移动端分析
   const { 
-    state: streamingState, 
-    startAnalysis, 
-    reset: resetStreaming 
+    state: mobileStreamingState, 
+    startAnalysis: startMobileAnalysis, 
+    reset: resetMobileStreaming 
   } = useStreamingAnalysis();
 
+  // 流式分析状态 - 用于桌面端分析
+  const { 
+    state: desktopStreamingState, 
+    startAnalysis: startDesktopAnalysis, 
+    reset: resetDesktopStreaming 
+  } = useStreamingAnalysis();
+
+  // 当前显示的分析状态（移动端优先，如果完成则显示桌面端）
+  const currentStreamingState = mobileStreamingState.currentPhase === "complete" && desktopStreamingState.currentPhase !== "idle"
+    ? desktopStreamingState
+    : mobileStreamingState;
+
   // 是否正在分析性能
-  const isPerformanceAnalyzing = isAnalyzingPerformance && !localPerformanceData;
+  const isPerformanceAnalyzing = analysisStatus === "running";
   
   // 是否分析完成
-  const isPerformanceComplete = !!localPerformanceData;
+  const isPerformanceComplete = analysisStatus === "completed" || !!localPerformanceData;
 
-  // 自动开始分析
+  // 自动开始分析 - 只执行一次
   useEffect(() => {
-    if (isAnalyzingPerformance && diagnosis.currentStep === "performance" && !localPerformanceData && !streamingState.data) {
+    if (isAnalyzingPerformance && 
+        diagnosis.currentStep === "performance" && 
+        !localPerformanceData && 
+        !hasStartedRef.current &&
+        analysisStatus === "idle") {
+      hasStartedRef.current = true;
+      setAnalysisStatus("running");
       handleStartAnalysis();
     }
-  }, [isAnalyzingPerformance, diagnosis.currentStep]);
+  }, [isAnalyzingPerformance, diagnosis.currentStep, analysisStatus]);
 
   // 处理开始分析
   const handleStartAnalysis = async () => {
-    resetStreaming();
+    resetMobileStreaming();
+    resetDesktopStreaming();
     
-    // 先分析移动端
-    const mobileData = await startAnalysis(diagnosis.url, "mobile");
-    
-    if (mobileData) {
+    try {
+      // 先分析移动端
+      const mobileData = await startMobileAnalysis(diagnosis.url, "mobile");
+      
+      if (!mobileData) {
+        setAnalysisStatus("error");
+        return;
+      }
+
       // 等待避免 QPS 限制
       await new Promise(resolve => setTimeout(resolve, 1100));
       
       // 再分析桌面端
-      const desktopData = await startAnalysis(diagnosis.url, "desktop");
+      const desktopData = await startDesktopAnalysis(diagnosis.url, "desktop");
       
       const result: PerformanceResultData = {
         mobile: mobileData,
@@ -103,7 +132,11 @@ export function AnalysisFlow({
       };
       
       setLocalPerformanceData(result);
+      setAnalysisStatus("completed");
+      hasCompletedRef.current = true;
       onPerformanceDataReceived?.(result);
+    } catch (error) {
+      setAnalysisStatus("error");
     }
   };
 
@@ -275,7 +308,7 @@ export function AnalysisFlow({
                         className="text-sm text-muted-foreground truncate"
                       >
                         {isPerformanceRunning 
-                          ? streamingState.currentThinkingMessage || "AI 正在深度分析网站性能..." 
+                          ? currentStreamingState.currentThinkingMessage || "AI 正在深度分析网站性能..." 
                           : step.description}
                       </p>
                     </div>
@@ -303,7 +336,7 @@ export function AnalysisFlow({
                           // AI Thinking 面板
                           <div className="p-4">
                             <AIThinkingPanel 
-                              state={streamingState}
+                              state={currentStreamingState}
                               url={diagnosis.url}
                               isExpanded={true}
                             />

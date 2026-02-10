@@ -5,6 +5,7 @@ import { CoreWebVitalsData } from "@/lib/types/diagnosis";
 
 // 分析阶段定义
 export type AnalysisPhase = 
+  | "idle"            // 空闲/未开始
   | "connecting"      // 连接API
   | "fetching"        // 获取原始数据
   | "parsing-scores"  // 解析四大评分
@@ -22,13 +23,20 @@ export interface PhaseInfo {
 
 export const ANALYSIS_PHASES: PhaseInfo[] = [
   {
+    id: "idle",
+    label: "等待开始",
+    description: "准备开始分析",
+    thinkingMessages: ["准备开始..."],
+  },
+  {
     id: "connecting",
     label: "连接服务",
-    description: "正在建立与Google PageSpeed Insights的连接",
+    description: "正在建立与性能分析服务的连接",
     thinkingMessages: [
       "正在初始化分析环境...",
-      "正在连接到Google PageSpeed Insights API...",
-      "连接已建立，准备发送请求...",
+      "正在连接到性能分析服务...",
+      "正在验证目标网站可访问性...",
+      "连接已建立，准备开始分析...",
     ],
   },
   {
@@ -36,9 +44,9 @@ export const ANALYSIS_PHASES: PhaseInfo[] = [
     label: "获取数据",
     description: "正在获取网站性能数据",
     thinkingMessages: [
-      "正在发送分析请求...",
-      "正在等待服务器响应...",
-      "正在下载性能数据包...",
+      "正在发送分析请求到服务器...",
+      "正在等待响应数据...",
+      "正在接收性能数据包...",
       "数据接收中，已接收 {progress}%...",
     ],
   },
@@ -47,24 +55,24 @@ export const ANALYSIS_PHASES: PhaseInfo[] = [
     label: "解析评分",
     description: "正在解析四大类别评分",
     thinkingMessages: [
-      "正在解析Performance评分...",
-      "正在解析Accessibility评分...",
-      "正在解析Best Practices评分...",
-      "正在解析SEO评分...",
+      "正在计算性能评分...",
+      "正在评估可访问性...",
+      "正在检查最佳实践...",
+      "正在分析SEO优化程度...",
       "四大类别评分解析完成",
     ],
   },
   {
     id: "parsing-cwv",
     label: "分析Web Vitals",
-    description: "正在分析Core Web Vitals指标",
+    description: "正在分析核心性能指标",
     thinkingMessages: [
-      "正在分析Largest Contentful Paint (LCP)...",
-      "正在分析First Contentful Paint (FCP)...",
-      "正在分析Cumulative Layout Shift (CLS)...",
-      "正在分析Total Blocking Time (TBT)...",
-      "正在分析Speed Index和TTI...",
-      "Core Web Vitals分析完成",
+      "正在测量页面加载速度 (LCP)...",
+      "正在分析首次渲染时间 (FCP)...",
+      "正在检测布局稳定性 (CLS)...",
+      "正在计算阻塞时间 (TBT)...",
+      "正在评估交互响应速度...",
+      "核心性能指标分析完成",
     ],
   },
   {
@@ -113,6 +121,7 @@ export function useStreamingAnalysis() {
   });
 
   const abortRef = useRef(false);
+  const isRunningRef = useRef(false);
 
   // 模拟思考消息流
   const streamThinkingMessages = useCallback(async (
@@ -138,13 +147,30 @@ export function useStreamingAnalysis() {
     }
   }, []);
 
-  // 开始流式分析
+  // 开始流式分析 - 单次执行，防止重复
   const startAnalysis = useCallback(async (
     url: string,
     strategy: "mobile" | "desktop" = "mobile",
     onProgress?: (state: StreamingState) => void
   ): Promise<CoreWebVitalsData | null> => {
+    // 防止重复执行
+    if (isRunningRef.current) {
+      console.log("[useStreamingAnalysis] Analysis already running, skipping...");
+      return null;
+    }
+    
+    isRunningRef.current = true;
     abortRef.current = false;
+    
+    // 重置状态
+    const initialState: StreamingState = {
+      currentPhase: "connecting",
+      phaseProgress: 0,
+      currentThinkingMessage: ANALYSIS_PHASES[0].thinkingMessages[0],
+      completedPhases: [],
+    };
+    setState(initialState);
+    onProgress?.(initialState);
     
     const updateState = (updates: Partial<StreamingState>) => {
       setState(prev => {
@@ -156,7 +182,7 @@ export function useStreamingAnalysis() {
 
     try {
       // Phase 1: 连接
-      updateState({ currentPhase: "connecting", phaseProgress: 0 });
+      updateState({ currentPhase: "connecting", phaseProgress: 5 });
       await streamThinkingMessages("connecting", (msg) => {
         updateState({ currentThinkingMessage: msg });
       }, 1500);
@@ -166,17 +192,16 @@ export function useStreamingAnalysis() {
       // Phase 2: 获取数据
       updateState({ 
         currentPhase: "fetching", 
-        phaseProgress: 20,
+        phaseProgress: 15,
         completedPhases: ["connecting"],
       });
 
       // 模拟进度更新
+      let progress = 15;
       const progressInterval = setInterval(() => {
-        setState((prev: StreamingState) => {
-          const newState = {
-            ...prev,
-            phaseProgress: Math.min(prev.phaseProgress + 5, 45),
-          };
+        progress = Math.min(progress + 3, 40);
+        setState(prev => {
+          const newState = { ...prev, phaseProgress: progress };
           onProgress?.(newState);
           return newState;
         });
@@ -255,34 +280,46 @@ export function useStreamingAnalysis() {
 
       if (abortRef.current) return null;
 
-      // 完成
-      updateState({ 
+      // 完成 - 确保状态稳定
+      const finalState: StreamingState = { 
         currentPhase: "complete", 
         phaseProgress: 100,
         completedPhases: ["connecting", "fetching", "parsing-scores", "parsing-cwv", "analyzing-issues", "generating-insights"],
         data,
         currentThinkingMessage: "分析完成！",
-      });
+      };
+      
+      setState(finalState);
+      onProgress?.(finalState);
 
       return data;
 
     } catch (error) {
-      updateState({
+      const errorState: StreamingState = {
+        currentPhase: "complete",
+        phaseProgress: 100,
+        completedPhases: state.completedPhases,
         error: error instanceof Error ? error.message : "未知错误",
         currentThinkingMessage: "分析过程中出现错误",
-      });
+      };
+      setState(errorState);
+      onProgress?.(errorState);
       return null;
+    } finally {
+      isRunningRef.current = false;
     }
   }, [streamThinkingMessages]);
 
   // 停止分析
   const stopAnalysis = useCallback(() => {
     abortRef.current = true;
+    isRunningRef.current = false;
   }, []);
 
   // 重置状态
   const reset = useCallback(() => {
     abortRef.current = false;
+    isRunningRef.current = false;
     setState({
       currentPhase: "connecting",
       phaseProgress: 0,
@@ -297,5 +334,6 @@ export function useStreamingAnalysis() {
     stopAnalysis,
     reset,
     ANALYSIS_PHASES,
+    isRunning: () => isRunningRef.current,
   };
 }
