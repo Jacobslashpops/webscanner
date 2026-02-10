@@ -16,6 +16,8 @@ import {
   Gauge,
   ChevronDown,
   ChevronUp,
+  Smartphone,
+  Monitor,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -61,83 +63,79 @@ export function AnalysisFlow({
 }: AnalysisFlowProps) {
   const [expandedStep, setExpandedStep] = useState<AnalysisStep | null>("performance");
   const [localPerformanceData, setLocalPerformanceData] = useState<PerformanceResultData | undefined>(performanceData);
-  const [analysisStatus, setAnalysisStatus] = useState<"idle" | "running" | "completed" | "error">("idle");
+  const [analysisPhase, setAnalysisPhase] = useState<"idle" | "analyzing-mobile" | "analyzing-desktop" | "completed" | "error">("idle");
   
   // 使用 ref 防止重复执行
   const hasStartedRef = useRef(false);
-  const hasCompletedRef = useRef(false);
   
-  // 流式分析状态 - 用于移动端分析
+  // 只使用一个流式分析状态（用于展示）
   const { 
-    state: mobileStreamingState, 
-    startAnalysis: startMobileAnalysis, 
-    reset: resetMobileStreaming 
+    state: streamingState, 
+    startAnalysis, 
+    reset: resetStreaming 
   } = useStreamingAnalysis();
 
-  // 流式分析状态 - 用于桌面端分析
-  const { 
-    state: desktopStreamingState, 
-    startAnalysis: startDesktopAnalysis, 
-    reset: resetDesktopStreaming 
-  } = useStreamingAnalysis();
-
-  // 当前显示的分析状态（移动端优先，如果完成则显示桌面端）
-  const currentStreamingState = mobileStreamingState.currentPhase === "complete" && desktopStreamingState.currentPhase !== "idle"
-    ? desktopStreamingState
-    : mobileStreamingState;
-
-  // 是否正在分析性能
-  const isPerformanceAnalyzing = analysisStatus === "running";
+  // 是否正在分析
+  const isAnalyzing = analysisPhase === "analyzing-mobile" || analysisPhase === "analyzing-desktop";
   
   // 是否分析完成
-  const isPerformanceComplete = analysisStatus === "completed" || !!localPerformanceData;
+  const isComplete = analysisPhase === "completed" || !!localPerformanceData;
 
   // 自动开始分析 - 只执行一次
   useEffect(() => {
     if (isAnalyzingPerformance && 
         diagnosis.currentStep === "performance" && 
-        !localPerformanceData && 
-        !hasStartedRef.current &&
-        analysisStatus === "idle") {
+        analysisPhase === "idle" &&
+        !hasStartedRef.current) {
       hasStartedRef.current = true;
-      setAnalysisStatus("running");
       handleStartAnalysis();
     }
-  }, [isAnalyzingPerformance, diagnosis.currentStep, analysisStatus]);
+  }, [isAnalyzingPerformance, diagnosis.currentStep, analysisPhase]);
 
-  // 处理开始分析
+  // 处理开始分析 - 只展示移动端的分析过程，桌面端静默分析
   const handleStartAnalysis = async () => {
-    resetMobileStreaming();
-    resetDesktopStreaming();
+    resetStreaming();
     
-    try {
-      // 先分析移动端
-      const mobileData = await startMobileAnalysis(diagnosis.url, "mobile");
-      
-      if (!mobileData) {
-        setAnalysisStatus("error");
-        return;
-      }
-
-      // 等待避免 QPS 限制
-      await new Promise(resolve => setTimeout(resolve, 1100));
-      
-      // 再分析桌面端
-      const desktopData = await startDesktopAnalysis(diagnosis.url, "desktop");
-      
-      const result: PerformanceResultData = {
-        mobile: mobileData,
-        desktop: desktopData || undefined,
-        analyzedAt: new Date().toISOString(),
-      };
-      
-      setLocalPerformanceData(result);
-      setAnalysisStatus("completed");
-      hasCompletedRef.current = true;
-      onPerformanceDataReceived?.(result);
-    } catch (error) {
-      setAnalysisStatus("error");
+    // 第一阶段：移动端分析（展示完整流程）
+    setAnalysisPhase("analyzing-mobile");
+    const mobileData = await startAnalysis(diagnosis.url, "mobile", (state) => {
+      // 可以在这里添加进度回调
+    });
+    
+    if (!mobileData) {
+      setAnalysisPhase("error");
+      return;
     }
+
+    // 第二阶段：桌面端分析（静默执行，不展示阶段变化）
+    setAnalysisPhase("analyzing-desktop");
+    
+    // 等待避免 QPS 限制
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    
+    // 静默分析桌面端（不传onProgress，不更新streamingState）
+    let desktopData;
+    try {
+      const response = await fetch(
+        `/api/pagespeed?url=${encodeURIComponent(diagnosis.url)}&strategy=desktop`
+      );
+      if (response.ok) {
+        desktopData = await response.json();
+      }
+    } catch (e) {
+      console.log("Desktop analysis failed, using mobile data only");
+    }
+
+    // 完成
+    const result: PerformanceResultData = {
+      mobile: mobileData,
+      desktop: desktopData || undefined,
+      analyzedAt: new Date().toISOString(),
+    };
+    
+    setLocalPerformanceData(result);
+    setAnalysisPhase("completed");
+    onPerformanceDataReceived?.(result);
   };
 
   // 自动展开当前步骤
@@ -237,7 +235,7 @@ export function AnalysisFlow({
               
               // 性能步骤特殊处理
               const isPerformance = step.id === "performance";
-              const isPerformanceRunning = isPerformance && isPerformanceAnalyzing;
+              const isPerformanceRunning = isPerformance && isAnalyzing;
               const hasPerformanceData = isPerformance && displayPerformanceData;
 
               return (
@@ -294,12 +292,13 @@ export function AnalysisFlow({
                         </span>
                         {isPerformanceRunning && (
                           <Badge data-element-id={`step-${step.id}-badge`} variant="outline" className="text-xs animate-pulse">
-                            AI 分析中...
+                            {analysisPhase === "analyzing-desktop" ? "分析桌面端..." : "AI 分析中..."}
                           </Badge>
                         )}
                         {hasPerformanceData && (
                           <Badge data-element-id={`step-${step.id}-score`} variant="secondary" className="text-xs">
                             性能 {displayPerformanceData.mobile.scores.performance}分
+                            {displayPerformanceData.desktop && " (双端)"}
                           </Badge>
                         )}
                       </div>
@@ -308,7 +307,9 @@ export function AnalysisFlow({
                         className="text-sm text-muted-foreground truncate"
                       >
                         {isPerformanceRunning 
-                          ? currentStreamingState.currentThinkingMessage || "AI 正在深度分析网站性能..." 
+                          ? analysisPhase === "analyzing-desktop"
+                            ? "正在分析桌面端性能..."
+                            : streamingState.currentThinkingMessage || "AI 正在深度分析网站性能..." 
                           : step.description}
                       </p>
                     </div>
@@ -333,13 +334,21 @@ export function AnalysisFlow({
                     >
                       {isPerformance ? (
                         isPerformanceRunning ? (
-                          // AI Thinking 面板
+                          // AI Thinking 面板 - 只展示移动端的分析过程
                           <div className="p-4">
                             <AIThinkingPanel 
-                              state={currentStreamingState}
+                              state={streamingState}
                               url={diagnosis.url}
                               isExpanded={true}
                             />
+                            {analysisPhase === "analyzing-desktop" && (
+                              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div className="flex items-center gap-2 text-blue-700">
+                                  <Monitor className="h-4 w-4" />
+                                  <span className="text-sm">正在补充分析桌面端数据...</span>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ) : hasPerformanceData ? (
                           // 完整的性能仪表盘
@@ -365,7 +374,7 @@ export function AnalysisFlow({
                   )}
                 </div>
               );
-            })}
+    })}
           </div>
         </CardContent>
       </Card>
