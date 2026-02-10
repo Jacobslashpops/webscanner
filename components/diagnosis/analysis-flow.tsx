@@ -16,8 +16,6 @@ import {
   Gauge,
   ChevronDown,
   ChevronUp,
-  Smartphone,
-  Monitor,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -30,6 +28,7 @@ import {
   AnalysisStepInfo,
   PerformanceResultData,
 } from "@/lib/types/diagnosis";
+import { PageSpeedDashboard } from "@/components/analysis/pagespeed-dashboard";
 
 interface AnalysisFlowProps {
   diagnosis: Diagnosis;
@@ -244,11 +243,17 @@ export function AnalysisFlow({
                   {isExpanded && status !== "pending" && (
                     <div 
                       data-element-id={`step-${step.id}-content`}
-                      className="border border-t-0 rounded-b-lg p-4 bg-background"
+                      className="border border-t-0 rounded-b-lg bg-background"
                     >
                       {isPerformance ? (
                         hasPerformanceData ? (
-                          <PerformanceResult data={performanceData} />
+                          <div className="p-4">
+                            <PageSpeedDashboard 
+                              mobileData={performanceData.mobile} 
+                              desktopData={performanceData.desktop}
+                              url={diagnosis.url}
+                            />
+                          </div>
                         ) : isPerformanceRunning ? (
                           <div className="flex items-center justify-center py-8">
                             <Loader2 className="h-6 w-6 animate-spin mr-2" />
@@ -291,134 +296,4 @@ export function AnalysisFlow({
       )}
     </div>
   );
-}
-
-// 性能分析结果展示
-function PerformanceResult({ data }: { data: PerformanceResultData }) {
-  const { mobile, desktop } = data;
-  const [activeDevice, setActiveDevice] = useState<"mobile" | "desktop">("mobile");
-  const deviceData = activeDevice === "mobile" ? mobile : (desktop || mobile);
-
-  return (
-    <div data-element-id="performance-result" className="space-y-4">
-      {/* 设备切换 */}
-      <div className="flex items-center justify-between">
-        <h4 className="font-medium">性能分析结果</h4>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setActiveDevice("mobile")}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-sm transition-colors ${
-              activeDevice === "mobile" 
-                ? "bg-primary text-primary-foreground" 
-                : "bg-muted hover:bg-muted/80"
-            }`}
-          >
-            <Smartphone className="h-4 w-4" />
-            移动端
-          </button>
-          <button
-            onClick={() => desktop && setActiveDevice("desktop")}
-            disabled={!desktop}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-sm transition-colors ${
-              !desktop 
-                ? "opacity-50 cursor-not-allowed" 
-                : activeDevice === "desktop"
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted hover:bg-muted/80"
-            }`}
-          >
-            <Monitor className="h-4 w-4" />
-            桌面端
-          </button>
-        </div>
-      </div>
-
-      {/* 评分卡片 */}
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          { label: "性能", score: deviceData.scores.performance },
-          { label: "可访问性", score: deviceData.scores.accessibility },
-          { label: "最佳实践", score: deviceData.scores.bestPractices },
-          { label: "SEO", score: deviceData.scores.seo },
-        ].map((item) => (
-          <div key={item.label} className="text-center p-3 rounded-lg bg-muted">
-            <div className={`text-2xl font-bold ${
-              item.score >= 90 ? "text-green-500" : 
-              item.score >= 70 ? "text-yellow-500" : "text-red-500"
-            }`}>
-              {item.score}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">{item.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Core Web Vitals */}
-      <div className="space-y-2">
-        <h5 className="text-sm font-medium">Core Web Vitals</h5>
-        <div className="grid grid-cols-2 gap-2">
-          <CWVBadge 
-            label="LCP" 
-            value={formatTime(deviceData.coreWebVitals.labData.lcp.value)}
-            rating={deviceData.coreWebVitals.labData.lcp.rating}
-          />
-          <CWVBadge 
-            label="CLS" 
-            value={deviceData.coreWebVitals.labData.cls.value.toFixed(3)}
-            rating={deviceData.coreWebVitals.labData.cls.rating}
-          />
-          <CWVBadge 
-            label="FCP" 
-            value={formatTime(deviceData.coreWebVitals.labData.fcp.value)}
-            rating={deviceData.coreWebVitals.labData.fcp.rating}
-          />
-          <CWVBadge 
-            label="TBT" 
-            value={formatTime(deviceData.coreWebVitals.labData.tbt.value)}
-            rating={deviceData.coreWebVitals.labData.tbt.score > 0.5 ? "good" : "needs-improvement"}
-          />
-        </div>
-      </div>
-
-      {/* 建议 */}
-      {deviceData.summary.recommendations.length > 0 && (
-        <div className="space-y-2">
-          <h5 className="text-sm font-medium">优化建议</h5>
-          <ul className="space-y-1">
-            {deviceData.summary.recommendations.slice(0, 3).map((rec: string, idx: number) => (
-              <li key={idx} className="text-sm text-muted-foreground flex items-start gap-2">
-                <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
-                <span>{rec}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="text-xs text-muted-foreground text-right">
-        分析时间: {new Date(data.analyzedAt).toLocaleString()}
-      </div>
-    </div>
-  );
-}
-
-// Core Web Vitals 小徽章
-function CWVBadge({ label, value, rating }: { label: string; value: string; rating: string }) {
-  const colors = {
-    good: "bg-green-100 text-green-700 border-green-200",
-    "needs-improvement": "bg-yellow-100 text-yellow-700 border-yellow-200",
-    poor: "bg-red-100 text-red-700 border-red-200",
-  };
-
-  return (
-    <div className={`flex items-center justify-between px-3 py-2 rounded-md border text-sm ${colors[rating as keyof typeof colors] || colors["needs-improvement"]}`}>
-      <span className="font-medium">{label}</span>
-      <span>{value}</span>
-    </div>
-  );
-}
-
-function formatTime(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
 }
