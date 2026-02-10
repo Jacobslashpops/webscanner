@@ -29,12 +29,15 @@ import {
   PerformanceResultData,
 } from "@/lib/types/diagnosis";
 import { PageSpeedDashboard } from "@/components/analysis/pagespeed-dashboard";
+import { AIThinkingPanel } from "@/components/analysis/ai-thinking-panel";
+import { useStreamingAnalysis } from "@/hooks/use-streaming-analysis";
 
 interface AnalysisFlowProps {
   diagnosis: Diagnosis;
   isAnalyzingPerformance: boolean;
   performanceData?: PerformanceResultData;
   onComplete?: () => void;
+  onPerformanceDataReceived?: (data: PerformanceResultData) => void;
 }
 
 // 步骤图标映射
@@ -53,9 +56,56 @@ export function AnalysisFlow({
   diagnosis, 
   isAnalyzingPerformance, 
   performanceData,
-  onComplete 
+  onComplete,
+  onPerformanceDataReceived,
 }: AnalysisFlowProps) {
   const [expandedStep, setExpandedStep] = useState<AnalysisStep | null>("performance");
+  const [localPerformanceData, setLocalPerformanceData] = useState<PerformanceResultData | undefined>(performanceData);
+  
+  // 流式分析状态
+  const { 
+    state: streamingState, 
+    startAnalysis, 
+    reset: resetStreaming 
+  } = useStreamingAnalysis();
+
+  // 是否正在分析性能
+  const isPerformanceAnalyzing = isAnalyzingPerformance && !localPerformanceData;
+  
+  // 是否分析完成
+  const isPerformanceComplete = !!localPerformanceData;
+
+  // 自动开始分析
+  useEffect(() => {
+    if (isAnalyzingPerformance && diagnosis.currentStep === "performance" && !localPerformanceData && !streamingState.data) {
+      handleStartAnalysis();
+    }
+  }, [isAnalyzingPerformance, diagnosis.currentStep]);
+
+  // 处理开始分析
+  const handleStartAnalysis = async () => {
+    resetStreaming();
+    
+    // 先分析移动端
+    const mobileData = await startAnalysis(diagnosis.url, "mobile");
+    
+    if (mobileData) {
+      // 等待避免 QPS 限制
+      await new Promise(resolve => setTimeout(resolve, 1100));
+      
+      // 再分析桌面端
+      const desktopData = await startAnalysis(diagnosis.url, "desktop");
+      
+      const result: PerformanceResultData = {
+        mobile: mobileData,
+        desktop: desktopData || undefined,
+        analyzedAt: new Date().toISOString(),
+      };
+      
+      setLocalPerformanceData(result);
+      onPerformanceDataReceived?.(result);
+    }
+  };
 
   // 自动展开当前步骤
   useEffect(() => {
@@ -75,6 +125,9 @@ export function AnalysisFlow({
     if (step.order === currentOrder) return isCompleted ? "completed" : "current";
     return "pending";
   };
+
+  // 使用本地或传入的性能数据
+  const displayPerformanceData = localPerformanceData || performanceData;
 
   return (
     <div data-element-id="analysis-flow" className="space-y-6">
@@ -151,14 +204,14 @@ export function AnalysisFlow({
               
               // 性能步骤特殊处理
               const isPerformance = step.id === "performance";
-              const isPerformanceRunning = isPerformance && isAnalyzingPerformance;
-              const hasPerformanceData = isPerformance && performanceData;
+              const isPerformanceRunning = isPerformance && isPerformanceAnalyzing;
+              const hasPerformanceData = isPerformance && displayPerformanceData;
 
               return (
                 <div key={step.id}>
                   <div
                     data-element-id={`step-${step.id}`}
-                    className={`flex items-center gap-4 rounded-lg border p-4 transition-all ${
+                    className={`flex items-center gap-4 rounded-lg border p-4 transition-all cursor-pointer ${
                       status === "current"
                         ? "border-primary bg-primary/5"
                         : status === "completed"
@@ -208,12 +261,12 @@ export function AnalysisFlow({
                         </span>
                         {isPerformanceRunning && (
                           <Badge data-element-id={`step-${step.id}-badge`} variant="outline" className="text-xs animate-pulse">
-                            分析中...
+                            AI 分析中...
                           </Badge>
                         )}
                         {hasPerformanceData && (
                           <Badge data-element-id={`step-${step.id}-score`} variant="secondary" className="text-xs">
-                            性能 {performanceData.mobile.scores.performance}分
+                            性能 {displayPerformanceData.mobile.scores.performance}分
                           </Badge>
                         )}
                       </div>
@@ -222,7 +275,7 @@ export function AnalysisFlow({
                         className="text-sm text-muted-foreground truncate"
                       >
                         {isPerformanceRunning 
-                          ? "正在调用 Google PageSpeed Insights API..." 
+                          ? streamingState.currentThinkingMessage || "AI 正在深度分析网站性能..." 
                           : step.description}
                       </p>
                     </div>
@@ -246,18 +299,23 @@ export function AnalysisFlow({
                       className="border border-t-0 rounded-b-lg bg-background"
                     >
                       {isPerformance ? (
-                        hasPerformanceData ? (
+                        isPerformanceRunning ? (
+                          // AI Thinking 面板
                           <div className="p-4">
-                            <PageSpeedDashboard 
-                              mobileData={performanceData.mobile} 
-                              desktopData={performanceData.desktop}
+                            <AIThinkingPanel 
+                              state={streamingState}
                               url={diagnosis.url}
+                              isExpanded={true}
                             />
                           </div>
-                        ) : isPerformanceRunning ? (
-                          <div className="flex items-center justify-center py-8">
-                            <Loader2 className="h-6 w-6 animate-spin mr-2" />
-                            <span className="text-muted-foreground">正在获取性能数据...</span>
+                        ) : hasPerformanceData ? (
+                          // 完整的性能仪表盘
+                          <div className="p-4">
+                            <PageSpeedDashboard 
+                              mobileData={displayPerformanceData.mobile} 
+                              desktopData={displayPerformanceData.desktop}
+                              url={diagnosis.url}
+                            />
                           </div>
                         ) : (
                           <div className="text-center py-8 text-muted-foreground">

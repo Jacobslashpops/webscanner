@@ -22,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AnalysisFlow } from "@/components/diagnosis/analysis-flow";
 import { useDiagnosis } from "@/hooks/use-diagnosis";
-import { CoreWebVitalsData } from "@/lib/types/diagnosis";
+import { PerformanceResultData } from "@/lib/types/diagnosis";
 
 export default function AnalysisPage() {
   const params = useParams();
@@ -32,9 +32,7 @@ export default function AnalysisPage() {
   const { diagnosis, isLoading, updateStep, saveStepResult, completeAnalysis } = useDiagnosis(id);
   const [isAnalyzingPerformance, setIsAnalyzingPerformance] = useState(false);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
-  const [analysisComplete, setAnalysisComplete] = useState(false);
-  const [mobileData, setMobileData] = useState<any>(null);
-  const [desktopData, setDesktopData] = useState<any>(null);
+  const [localPerformanceData, setLocalPerformanceData] = useState<PerformanceResultData | undefined>(undefined);
 
   // 保存诊断数据到 localStorage 供调试页面使用
   useEffect(() => {
@@ -43,78 +41,33 @@ export default function AnalysisPage() {
     }
   }, [diagnosis, id]);
 
-  // 自动开始性能分析（当步骤为 performance 时）
-  const runPerformanceAnalysis = useCallback(async () => {
-    if (!diagnosis || diagnosis.currentStep !== "performance") return;
-    
-    // 如果已经有结果了，跳过
-    if (diagnosis.results?.performance) {
-      setAnalysisComplete(true);
-      setMobileData(diagnosis.results.performance.mobile);
-      setDesktopData(diagnosis.results.performance.desktop);
-      return;
-    }
-
-    setIsAnalyzingPerformance(true);
-    setPerformanceError(null);
-
-    try {
-      // 先分析移动端
-      const mobileRes = await fetch(
-        `/api/pagespeed?url=${encodeURIComponent(diagnosis.url)}&strategy=mobile`
-      );
-
-      if (!mobileRes.ok) {
-        const errorData = await mobileRes.json();
-        throw new Error(errorData.message || "性能分析失败");
-      }
-
-      const mobile: CoreWebVitalsData = await mobileRes.json();
-      setMobileData(mobile);
-      
-      // 等待一下避免 QPS 限制
-      await new Promise((resolve) => setTimeout(resolve, 1100));
-      
-      // 再分析桌面端
-      const desktopRes = await fetch(
-        `/api/pagespeed?url=${encodeURIComponent(diagnosis.url)}&strategy=desktop`
-      );
-
-      let desktop: CoreWebVitalsData | undefined;
-      if (desktopRes.ok) {
-        desktop = await desktopRes.json();
-        setDesktopData(desktop);
-      }
-
-      // 保存分析结果
-      const result = {
-        mobile,
-        desktop,
-        analyzedAt: new Date().toISOString(),
-      };
-
-      saveStepResult("performance", result);
-      setAnalysisComplete(true);
-      
-      // 延迟后进入下一步
-      setTimeout(() => {
-        updateStep("analyzing-structure");
-      }, 2000);
-
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "分析失败";
-      setPerformanceError(errorMessage);
-    } finally {
-      setIsAnalyzingPerformance(false);
-    }
-  }, [diagnosis, saveStepResult, updateStep]);
-
-  // 监听步骤变化，自动开始分析
+  // 初始化：从 pending 进入 performance
   useEffect(() => {
-    if (diagnosis?.currentStep === "performance" && !isAnalyzingPerformance && !analysisComplete) {
-      runPerformanceAnalysis();
+    if (diagnosis?.currentStep === "init") {
+      updateStep("performance");
     }
-  }, [diagnosis?.currentStep, runPerformanceAnalysis, isAnalyzingPerformance, analysisComplete]);
+  }, [diagnosis?.currentStep, updateStep]);
+
+  // 当步骤变为 performance 时开始分析
+  useEffect(() => {
+    if (diagnosis?.currentStep === "performance" && !localPerformanceData) {
+      setIsAnalyzingPerformance(true);
+    }
+  }, [diagnosis?.currentStep, localPerformanceData]);
+
+  // 处理性能数据接收
+  const handlePerformanceDataReceived = useCallback((data: PerformanceResultData) => {
+    setLocalPerformanceData(data);
+    setIsAnalyzingPerformance(false);
+    
+    // 保存到诊断结果
+    saveStepResult("performance", data);
+    
+    // 延迟后进入下一步
+    setTimeout(() => {
+      updateStep("analyzing-structure");
+    }, 2000);
+  }, [saveStepResult, updateStep]);
 
   // 模拟后续步骤
   useEffect(() => {
@@ -139,13 +92,6 @@ export default function AnalysisPage() {
       return () => clearTimeout(timer);
     }
   }, [diagnosis?.currentStep, updateStep, completeAnalysis]);
-
-  // 初始化：从 pending 进入 performance
-  useEffect(() => {
-    if (diagnosis?.currentStep === "init") {
-      updateStep("performance");
-    }
-  }, [diagnosis?.currentStep, updateStep]);
 
   if (isLoading) {
     return (
@@ -231,8 +177,7 @@ export default function AnalysisPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={runPerformanceAnalysis}
-                      disabled={isAnalyzingPerformance}
+                      onClick={() => setIsAnalyzingPerformance(true)}
                     >
                       <RotateCcw className="mr-2 h-4 w-4" />
                       重试
@@ -244,8 +189,9 @@ export default function AnalysisPage() {
               <AnalysisFlow
                 diagnosis={diagnosis}
                 isAnalyzingPerformance={isAnalyzingPerformance}
-                performanceData={diagnosis.results?.performance}
+                performanceData={localPerformanceData || diagnosis.results?.performance}
                 onComplete={() => router.push(`/dashboard/diagnosis/${id}`)}
+                onPerformanceDataReceived={handlePerformanceDataReceived}
               />
             </div>
           </main>
