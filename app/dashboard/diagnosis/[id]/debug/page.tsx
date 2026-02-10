@@ -2,13 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, RefreshCw, Download, Smartphone, Monitor, Loader2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Download, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { PerformancePanelV2 } from "@/components/analysis/performance-panel-v2";
+import { Card, CardContent } from "@/components/ui/card";
+import { PageSpeedDashboard } from "@/components/analysis/pagespeed-dashboard";
 
 export default function DebugPage() {
   const params = useParams();
@@ -21,7 +19,7 @@ export default function DebugPage() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
-    // 从 localStorage 或查询参数获取 URL
+    // 从 localStorage 获取 URL
     const stored = localStorage.getItem(`diagnosis-${id}`);
     if (stored) {
       const parsed = JSON.parse(stored);
@@ -33,15 +31,22 @@ export default function DebugPage() {
       try {
         // 获取移动端数据
         const mobileRes = await fetch(`/api/debug/pagespeed?url=${encodeURIComponent(parsed.url)}&strategy=mobile`);
-        if (!mobileRes.ok) throw new Error("Failed to fetch mobile data");
+        if (!mobileRes.ok) {
+          const err = await mobileRes.json();
+          throw new Error(err.message || "移动端分析失败");
+        }
         const mobile = await mobileRes.json();
         setMobileData(mobile);
 
+        // 等待避免 QPS 限制
+        await new Promise(resolve => setTimeout(resolve, 1100));
+        
         // 获取桌面端数据
         const desktopRes = await fetch(`/api/debug/pagespeed?url=${encodeURIComponent(parsed.url)}&strategy=desktop`);
-        if (!desktopRes.ok) throw new Error("Failed to fetch desktop data");
-        const desktop = await desktopRes.json();
-        setDesktopData(desktop);
+        if (desktopRes.ok) {
+          const desktop = await desktopRes.json();
+          setDesktopData(desktop);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
       } finally {
@@ -65,139 +70,73 @@ export default function DebugPage() {
     const url2 = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url2;
-    a.download = `pagespeed-debug-${id}.json`;
+    a.download = `pagespeed-${id}-${Date.now()}.json`;
     a.click();
   };
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto py-6 px-4 max-w-7xl">
-        {/* 头部 */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <Link href={`/dashboard/diagnosis/${id}/analysis`}>
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                返回分析
+      {/* 固定顶部导航 */}
+      <div className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b">
+        <div className="container mx-auto py-4 px-4 max-w-7xl">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link href={`/dashboard/diagnosis/${id}/analysis`}>
+                <Button variant="ghost" size="sm">
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  返回分析
+                </Button>
+              </Link>
+              <div>
+                <h1 className="text-xl font-bold">PageSpeed Insights 详细报告</h1>
+                {url && <p className="text-sm text-muted-foreground truncate max-w-md">{url}</p>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
+                <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+                刷新
               </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold">API 调试工具</h1>
-              <p className="text-sm text-muted-foreground">{url}</p>
+              <Button variant="outline" size="sm" onClick={downloadJson} disabled={!mobileData}>
+                <Download className="mr-2 h-4 w-4" />
+                导出 JSON
+              </Button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
-              <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-              刷新
-            </Button>
-            <Button variant="outline" size="sm" onClick={downloadJson} disabled={!mobileData}>
-              <Download className="mr-2 h-4 w-4" />
-              导出 JSON
-            </Button>
-          </div>
         </div>
+      </div>
 
-        {error && (
-          <Card className="border-red-200 bg-red-50 mb-6">
-            <CardContent className="p-4">
-              <p className="text-red-700">{error}</p>
+      {/* 主内容 */}
+      <div className="container mx-auto py-6 px-4 max-w-7xl">
+        {isLoading ? (
+          <Card>
+            <CardContent className="p-12">
+              <div className="flex flex-col items-center justify-center">
+                <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+                <p className="text-muted-foreground">正在获取 PageSpeed Insights 数据...</p>
+                <p className="text-sm text-muted-foreground mt-2">请稍候，这可能需要几秒钟</p>
+              </div>
             </CardContent>
           </Card>
-        )}
-
-        <Tabs defaultValue="visual" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="visual">可视化展示</TabsTrigger>
-            <TabsTrigger value="raw">原始 JSON</TabsTrigger>
-            <TabsTrigger value="audits">所有 Audits</TabsTrigger>
-          </TabsList>
-
-          {/* 可视化展示 */}
-          <TabsContent value="visual">
-            <PerformancePanelV2
-              url={url}
-              mobileData={mobileData}
-              desktopData={desktopData}
-              isLoading={isLoading}
-            />
-          </TabsContent>
-
-          {/* 原始 JSON */}
-          <TabsContent value="raw">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Smartphone className="h-4 w-4" />
-                  移动端数据
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="bg-muted p-4 rounded-lg overflow-auto max-h-96 text-xs">
-                  {JSON.stringify(mobileData, null, 2)}
-                </pre>
-              </CardContent>
-            </Card>
-
-            {desktopData && (
-              <Card className="mt-4">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Monitor className="h-4 w-4" />
-                    桌面端数据
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <pre className="bg-muted p-4 rounded-lg overflow-auto max-h-96 text-xs">
-                    {JSON.stringify(desktopData, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-
-          {/* 所有 Audits */}
-          <TabsContent value="audits">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">所有 Audits ({mobileData?.lighthouseResult?.audits ? Object.keys(mobileData.lighthouseResult.audits).length : 0})</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                  </div>
-                ) : mobileData?.lighthouseResult?.audits ? (
-                  <div className="grid gap-2 max-h-96 overflow-auto">
-                    {Object.entries(mobileData.lighthouseResult.audits).map(([key, audit]: [string, any]) => (
-                      <div key={key} className="flex items-center justify-between p-3 border rounded-lg text-sm">
-                        <div className="flex-1">
-                          <div className="font-medium">{audit.title || key}</div>
-                          <div className="text-xs text-muted-foreground font-mono">{key}</div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {audit.score !== null && (
-                            <Badge variant={audit.score === 1 ? "default" : audit.score === 0 ? "destructive" : "secondary"}>
-                              {audit.score === 1 ? "通过" : audit.score === 0 ? "失败" : Math.round(audit.score * 100)}
-                            </Badge>
-                          )}
-                          {audit.displayValue && (
-                            <span className="text-xs text-muted-foreground">{audit.displayValue}</span>
-                          )}
-                          <Badge variant="outline" className="text-xs">
-                            {audit.scoreDisplayMode}
-                          </Badge>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-center text-muted-foreground py-8">暂无数据</p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+        ) : error ? (
+          <Card className="border-red-200">
+            <CardContent className="p-6">
+              <div className="text-center">
+                <p className="text-red-600 font-medium">{error}</p>
+                <Button variant="outline" className="mt-4" onClick={fetchData}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  重试
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : mobileData ? (
+          <PageSpeedDashboard
+            mobileData={mobileData}
+            desktopData={desktopData}
+            url={url}
+          />
+        ) : null}
       </div>
     </div>
   );
